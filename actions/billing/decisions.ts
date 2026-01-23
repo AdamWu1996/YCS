@@ -89,7 +89,7 @@ export async function createBillingDecision(
     }
 
     // Transaction 成功執行
-    revalidatePath('/');
+    revalidatePath('/dashboard/billing');
     return {
       success: true,
       data: result,
