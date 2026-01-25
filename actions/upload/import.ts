@@ -39,6 +39,18 @@ export async function importTimeRecords(
 
     for (const record of records) {
       try {
+        // 潔癖行為：過濾小於 5 分鐘的雜訊數據
+        if (record.check_in_time && record.check_out_time) {
+          const checkIn = new Date(record.check_in_time);
+          const checkOut = new Date(record.check_out_time);
+          const durationMinutes = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60);
+          
+          if (durationMinutes < 5) {
+            skipped++;
+            continue; // 跳過小於 5 分鐘的數據
+          }
+        }
+
         // 檢查是否已存在相同紀錄
         // 防重條件：相同 staff_id、record_date、factory_location、check_in_time
         const { data: existing, error: checkError } = await supabase

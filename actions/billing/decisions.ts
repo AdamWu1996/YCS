@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache';
  */
 export interface CreateBillingDecisionParams {
   time_record_ids: string[];
+  task_id: string;
   decision_type: string;
   final_md: number;
   recommended_md?: number;
@@ -27,8 +28,9 @@ export interface CreateBillingDecisionParams {
  * 流程：
  * 1. 檢查傳入的 time_record_ids 是否已被任何 is_active = TRUE 的 billing_decision 關聯
  * 2. 若存在，先將舊 decision 設為 is_active = FALSE
- * 3. 建立新的 billing_decision（is_active = TRUE）
- * 4. 建立對應的 billing_decision_records
+ * 3. 更新該批工時的 task_id（認領動作）
+ * 4. 建立新的 billing_decision（is_active = TRUE）
+ * 5. 建立對應的 billing_decision_records
  * 
  * 整個流程在單一 Transaction 中完成，確保資料一致性。
  */
@@ -38,6 +40,14 @@ export async function createBillingDecision(
   const supabase = createServerSupabaseClient();
 
   try {
+    // 步驟 0: 基本驗證（未選任務禁止認領）
+    if (!params.task_id) {
+      return {
+        success: false,
+        error: '請先選擇專案任務',
+      };
+    }
+
     // 步驟 1: 檢查是否有現有的 active decision 關聯這些 time_record_ids
     // 透過 billing_decision_records 關聯表查詢，確保遵循數據血統原則
     const { data: existingRecords, error: checkError } = await supabase
@@ -81,6 +91,7 @@ export async function createBillingDecision(
         p_conflict_resolution_notes: params.conflict_resolution_notes ?? null,
         p_is_billable: params.is_billable ?? false,
         p_decision_ids_to_deactivate: Array.from(decisionIdsToDeactivate),
+        p_task_id: params.task_id,
       }
     );
 

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { PendingBillingDecision } from '@/actions/billing/queries';
+import type { ClaimableTask, PendingBillingDecision } from '@/actions/billing/queries';
 import { createBillingDecision } from '@/actions/billing/decisions';
 import { DecisionTable } from './decision-table';
 import { DecisionDialog } from './decision-dialog';
@@ -11,18 +11,47 @@ import { toast } from 'sonner';
 
 interface BillingDecisionBoardProps {
   initialData: PendingBillingDecision[];
+  taskOptions: ClaimableTask[];
 }
 
 /**
  * 請款裁決看板主組件
  * 管理選中的時數紀錄，處理裁決流程
  */
-export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps) {
+export function BillingDecisionBoard({
+  initialData,
+  taskOptions,
+}: BillingDecisionBoardProps) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [data, setData] = useState(initialData);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [viewMode, setViewMode] = useState<'pool' | 'all'>('pool');
+
+  const taskLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    taskOptions.forEach((task) => {
+      if (!task.project) return;
+      map.set(task.id, `${task.project.code}-${task.code}`);
+    });
+    return map;
+  }, [taskOptions]);
+
+  const poolData = useMemo(
+    () => data.filter((item) => !item.task_id),
+    [data]
+  );
+  const visibleData = useMemo(() => {
+    return viewMode === 'pool' ? poolData : data;
+  }, [viewMode, poolData, data]);
+
+  // 移除自動切換邏輯，允許用戶查看公海池的空狀態
+  // useEffect(() => {
+  //   if (viewMode === 'pool' && poolData.length === 0) {
+  //     setViewMode('all');
+  //   }
+  // }, [viewMode, poolData.length]);
 
   // 計算選中項目的總時數與建議 MD
   const selectedSummary = useMemo(() => {
@@ -52,10 +81,10 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
 
   // 處理全選/取消全選
   const handleToggleSelectAll = () => {
-    if (selectedIds.size === data.length) {
+    if (selectedIds.size === visibleData.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(data.map((item) => item.time_record_id)));
+      setSelectedIds(new Set(visibleData.map((item) => item.time_record_id)));
     }
   };
 
@@ -80,9 +109,17 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
   };
 
   // 處理裁決確認
-  const handleConfirmDecision = async (finalMd: number, reason: string) => {
+  const handleConfirmDecision = async (
+    finalMd: number,
+    reason: string,
+    taskId: string
+  ) => {
     if (selectedIds.size === 0) {
       toast.error('請至少選擇一筆時數紀錄');
+      return;
+    }
+    if (!taskId) {
+      toast.error('請先選擇專案任務');
       return;
     }
 
@@ -92,6 +129,7 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
     try {
       const result = await createBillingDecision({
         time_record_ids: timeRecordIds,
+        task_id: taskId,
         decision_type: hasConflict ? 'conflict_resolved' : 'merged_records',
         final_md: finalMd,
         recommended_md: selectedSummary.recommendedMd,
@@ -121,7 +159,7 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
     <>
       <div className="space-y-4">
         {/* 操作列 */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-muted-foreground">
             已選擇 {selectedIds.size} 筆紀錄
             {selectedIds.size > 0 && (
@@ -131,13 +169,31 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
               </span>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={viewMode === 'pool' ? 'default' : 'outline'}
+              onClick={() => {
+                setViewMode('pool');
+                setSelectedIds(new Set());
+              }}
+            >
+              公海池 ({poolData.length})
+            </Button>
+            <Button
+              variant={viewMode === 'all' ? 'default' : 'outline'}
+              onClick={() => {
+                setViewMode('all');
+                setSelectedIds(new Set());
+              }}
+            >
+              全部待裁決 ({data.length})
+            </Button>
             <Button
               variant="outline"
               onClick={handleToggleSelectAll}
-              disabled={data.length === 0}
+              disabled={visibleData.length === 0}
             >
-              {selectedIds.size === data.length ? '取消全選' : '全選'}
+              {selectedIds.size === visibleData.length ? '取消全選' : '全選'}
             </Button>
             <Button
               variant="outline"
@@ -157,10 +213,12 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
 
         {/* 資料表格 */}
         <DecisionTable
-          data={data}
+          data={visibleData}
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}
           onToggleSelectAll={handleToggleSelectAll}
+          taskLabelById={taskLabelById}
+          viewMode={viewMode}
         />
       </div>
 
@@ -170,6 +228,7 @@ export function BillingDecisionBoard({ initialData }: BillingDecisionBoardProps)
         onOpenChange={setIsDialogOpen}
         selectedSummary={selectedSummary}
         onConfirm={handleConfirmDecision}
+        taskOptions={taskOptions}
       />
     </>
   );

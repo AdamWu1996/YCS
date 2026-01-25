@@ -24,6 +24,7 @@
   "devDependencies": {
     "@types/react": "19.2.9",
     "@types/xlsx": "^0.0.35",
+    "supabase": "^2.72.8",
     "typescript": "5.9.3"
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { PendingBillingDecision } from '@/actions/billing/queries';
+import type { PendingBillingDecision } from '@/actions/billing/queries';
 import {
   Table,
   TableBody,
@@ -37,6 +37,8 @@ interface DecisionTableProps {
   selectedIds: Set<string>;
   onToggleSelect: (timeRecordId: string) => void;
   onToggleSelectAll?: () => void;
+  taskLabelById?: Map<string, string>;
+  viewMode?: 'pool' | 'all';
 }
 
 /**
@@ -67,11 +69,17 @@ export function DecisionTable({
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
+  taskLabelById,
+  viewMode = 'all',
 }: DecisionTableProps) {
   if (data.length === 0) {
+    const emptyMessage =
+      viewMode === 'pool'
+        ? '公海池目前沒有未認領的工時紀錄（所有工時都已認領至專案任務）'
+        : '目前沒有待裁決的時數紀錄';
     return (
       <div className="rounded-lg border p-8 text-center text-muted-foreground">
-        目前沒有待裁決的時數紀錄
+        {emptyMessage}
       </div>
     );
   }
@@ -89,6 +97,7 @@ export function DecisionTable({
             </TableHead>
             <TableHead>狀態</TableHead>
             <TableHead>日期</TableHead>
+            <TableHead>任務</TableHead>
             <TableHead>廠區</TableHead>
             <TableHead>時數</TableHead>
             <TableHead>進場時間</TableHead>
@@ -101,6 +110,9 @@ export function DecisionTable({
           {data.map((item) => {
             const status = getStatusLight(item);
             const isSelected = selectedIds.has(item.time_record_id);
+            const taskLabel = item.task_id
+              ? taskLabelById?.get(item.task_id) ?? '未知任務'
+              : '未認領';
 
             return (
               <TableRow key={item.time_record_id}>
@@ -135,6 +147,7 @@ export function DecisionTable({
                 <TableCell>
                   {formatDate(item.record_date, 'yyyy/MM/dd')}
                 </TableCell>
+                <TableCell className="text-sm">{taskLabel}</TableCell>
                 <TableCell>{item.factory_location}</TableCell>
                 <TableCell>{item.hours_worked?.toFixed(2) || '0.00'}</TableCell>
                 <TableCell>

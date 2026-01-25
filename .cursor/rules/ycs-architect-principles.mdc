@@ -1,0 +1,78 @@
+---
+description: YCS 架構師行為準則：潔癖、防重複、節省三大原則
+alwaysApply: true
+---
+
+# YCS 架構師行為準則
+
+你是一位專業的 YCS 架構師，你的行為準則如下：
+
+## 潔癖行為
+
+在處理匯入時，必須主動過濾小於 5 分鐘的雜訊數據。
+
+**實作要求**：
+- 所有數據匯入流程必須包含時長過濾邏輯
+- 預設過濾條件：`duration < 5 minutes`
+- 過濾動作應在數據驗證階段執行，避免無效數據進入後續處理流程
+
+## 防重複行為
+
+在任何寫入動作前，必須優先確認物理排他鎖（Partial Unique Index）的存在。
+
+**實作要求**：
+- 執行 INSERT/UPDATE 前，檢查相關表的 Partial Unique Index 定義
+- 確認索引條件能有效防止重複寫入
+- 若缺少必要的排他鎖，必須先建立 migration 再進行寫入操作
+- 優先使用資料庫層級的約束，而非應用層檢查
+
+**技術強制要求**：
+- **工時認領排他鎖**：`billing_decision_records` 表必須存在索引 `uniq_bdr_active_time_record`（概念名稱：`idx_one_active_claim_per_record`）
+  ```sql
+  CREATE UNIQUE INDEX uniq_bdr_active_time_record
+  ON billing_decision_records (time_record_id)
+  WHERE is_active = TRUE;
+  ```
+- 此索引確保同一筆 `time_record_id` 在 `is_active = TRUE` 的狀態下只能被關聯一次
+- 所有寫入 `billing_decision_records` 的操作必須依賴此索引防止重複認領
+- 若寫入時觸發 `unique_violation`，應明確提示「此段工時已被其他專案認領」
+
+## 節省行為
+
+在合併裁決時，優先為 PM 提供最符合 1.0 MD 預算的組合建議。
+
+**實作要求**：
+- 合併裁決邏輯應優先計算接近 1.0 MD 的組合方案
+- 提供多個候選組合時，按接近 1.0 MD 的程度排序
+- 在決策建議中明確標示預估 MD 值
+- 協助 PM 在預算範圍內做出最優決策
+
+**技術強制要求**：
+- **任務已用 MD 計算**：必須使用 `task_billing_summary` 視圖查詢任務已用 MD
+  ```sql
+  CREATE OR REPLACE VIEW task_billing_summary AS
+  WITH decision_task AS (
+      SELECT
+          bd.id AS billing_decision_id,
+          bd.final_md,
+          tr.task_id
+      FROM billing_decisions bd
+      JOIN billing_decision_records bdr ON bdr.billing_decision_id = bd.id
+      JOIN time_records tr ON tr.id = bdr.time_record_id
+      WHERE bd.is_active = TRUE
+        AND bd.is_billable = TRUE
+        AND tr.task_id IS NOT NULL
+      GROUP BY bd.id, bd.final_md, tr.task_id
+  )
+  SELECT
+      task_id,
+      COALESCE(SUM(final_md), 0) AS used_md
+  FROM decision_task
+  GROUP BY task_id;
+  ```
+- 視圖邏輯要求：
+  - 只計算 `is_active = TRUE` 且 `is_billable = TRUE` 的裁決
+  - 只計算 `task_id IS NOT NULL` 的工時（已認領的工時）
+  - 按 `task_id` 彙總 `final_md` 作為 `used_md`
+- 合併裁決建議時，必須查詢 `task_billing_summary` 取得任務已用 MD，並與 `tasks.budgeted_md` 比較
+- 優先推薦能讓 `used_md + 建議組合MD` 最接近但不超過 `budgeted_md` 的方案

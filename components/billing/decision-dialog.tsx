@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select } from '@/components/ui/select';
+import type { ClaimableTask } from '@/actions/billing/queries';
 
 interface DecisionDialogProps {
   open: boolean;
@@ -23,7 +25,8 @@ interface DecisionDialogProps {
     hasConflict: boolean;
     count: number;
   };
-  onConfirm: (finalMd: number, reason: string) => Promise<void>;
+  taskOptions: ClaimableTask[];
+  onConfirm: (finalMd: number, reason: string, taskId: string) => Promise<void>;
 }
 
 /**
@@ -34,6 +37,7 @@ export function DecisionDialog({
   open,
   onOpenChange,
   selectedSummary,
+  taskOptions,
   onConfirm,
 }: DecisionDialogProps) {
   const [finalMd, setFinalMd] = useState<string>(
@@ -41,16 +45,92 @@ export function DecisionDialog({
   );
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [selectedTaskId, setSelectedTaskId] = useState('');
+
+  const projectOptions = useMemo(() => {
+    const projectMap = new Map<string, { id: string; code: string; name: string }>();
+    taskOptions.forEach((task) => {
+      if (task.project) {
+        projectMap.set(task.project.id, task.project);
+      }
+    });
+    return Array.from(projectMap.values()).sort((a, b) =>
+      a.code.localeCompare(b.code)
+    );
+  }, [taskOptions]);
+
+  const tasksForProject = useMemo(() => {
+    if (!selectedProjectId) return [];
+    return taskOptions
+      .filter((task) => task.project?.id === selectedProjectId)
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [taskOptions, selectedProjectId]);
+
+  const selectedTask = useMemo(() => {
+    return taskOptions.find((task) => task.id === selectedTaskId) ?? null;
+  }, [taskOptions, selectedTaskId]);
+
+  const projectStats = useMemo(() => {
+    if (!selectedProjectId) {
+      return {
+        usedMd: 0,
+        budgetedMd: 0,
+        hasBudget: false,
+      };
+    }
+
+    const usedMd = tasksForProject.reduce((sum, task) => sum + (task.used_md || 0), 0);
+    const budgetedMd = tasksForProject.reduce(
+      (sum, task) => sum + (task.budgeted_md || 0),
+      0
+    );
+    const hasBudget = tasksForProject.some((task) => task.budgeted_md !== null);
+
+    return {
+      usedMd,
+      budgetedMd,
+      hasBudget,
+    };
+  }, [selectedProjectId, tasksForProject]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (projectOptions.length === 0) return;
+    if (!selectedProjectId) {
+      setSelectedProjectId(projectOptions[0].id);
+    }
+  }, [open, projectOptions, selectedProjectId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (tasksForProject.length === 0) {
+      setSelectedTaskId('');
+      return;
+    }
+    if (!selectedTaskId || !tasksForProject.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(tasksForProject[0].id);
+    }
+  }, [open, tasksForProject, selectedTaskId]);
+
+  useEffect(() => {
+    if (!open) return;
+    setFinalMd(selectedSummary.recommendedMd.toString());
+    setReason('');
+  }, [open, selectedSummary.recommendedMd]);
 
   const handleSubmit = async () => {
     const mdValue = parseFloat(finalMd);
     if (isNaN(mdValue) || mdValue <= 0) {
       return;
     }
+    if (!selectedTaskId) {
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      await onConfirm(mdValue, reason);
+      await onConfirm(mdValue, reason, selectedTaskId);
     } finally {
       setIsSubmitting(false);
     }
@@ -67,6 +147,46 @@ export function DecisionDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* 專案與任務選擇 */}
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="project-select">專案 *</Label>
+              <Select
+                id="project-select"
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                disabled={projectOptions.length === 0}
+              >
+                {projectOptions.length === 0 && (
+                  <option value="">沒有可用專案</option>
+                )}
+                {projectOptions.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.code} {project.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-select">任務 *</Label>
+              <Select
+                id="task-select"
+                value={selectedTaskId}
+                onChange={(e) => setSelectedTaskId(e.target.value)}
+                disabled={tasksForProject.length === 0}
+              >
+                {tasksForProject.length === 0 && (
+                  <option value="">沒有可用任務</option>
+                )}
+                {tasksForProject.map((task) => (
+                  <option key={task.id} value={task.id}>
+                    {task.code} {task.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
           {/* 摘要資訊 */}
           <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
             <div className="flex justify-between">
@@ -89,6 +209,38 @@ export function DecisionDialog({
                 <span className="text-sm font-medium">包含衝突紀錄</span>
               </div>
             )}
+          </div>
+
+          {/* 任務進度 */}
+          <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-muted-foreground">任務已用 MD：</span>
+              <span className="font-medium">
+                {selectedTask?.used_md !== null && selectedTask?.used_md !== undefined
+                  ? selectedTask.used_md.toFixed(2)
+                  : '0.00'} /
+                {selectedTask?.budgeted_md !== null && selectedTask?.budgeted_md !== undefined
+                  ? ` ${selectedTask.budgeted_md.toFixed(2)}`
+                  : ' 未設定'} MD
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-muted-foreground">本次裁決 MD：</span>
+              <span className="font-medium">
+                {!isNaN(parseFloat(finalMd)) ? parseFloat(finalMd).toFixed(2) : '-'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-muted-foreground">裁決後累計 MD：</span>
+              <span className="font-medium">
+                {selectedTask?.used_md !== null && selectedTask?.used_md !== undefined && !isNaN(parseFloat(finalMd))
+                  ? (selectedTask.used_md + parseFloat(finalMd)).toFixed(2)
+                  : '-'} /
+                {selectedTask?.budgeted_md !== null && selectedTask?.budgeted_md !== undefined
+                  ? ` ${selectedTask.budgeted_md.toFixed(2)}`
+                  : ' 未設定'} MD
+              </span>
+            </div>
           </div>
 
           {/* 最終 MD 輸入 */}
@@ -130,6 +282,7 @@ export function DecisionDialog({
             onClick={handleSubmit}
             disabled={
               isSubmitting ||
+              !selectedTaskId ||
               !reason.trim() ||
               isNaN(parseFloat(finalMd)) ||
               parseFloat(finalMd) <= 0

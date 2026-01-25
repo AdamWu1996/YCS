@@ -1,4 +1,4 @@
-import { getPendingBillingDecisions } from '@/actions/billing/queries';
+import { getClaimableTasks, getPendingBillingDecisions } from '@/actions/billing/queries';
 import { BillingDecisionBoard } from '@/components/billing/decision-board';
 
 /**
@@ -6,14 +6,19 @@ import { BillingDecisionBoard } from '@/components/billing/decision-board';
  * PM 使用的請款裁決介面，顯示待裁決的時數紀錄並允許進行裁決
  */
 export default async function BillingDashboardPage() {
-  const result = await getPendingBillingDecisions();
+  const [result, taskResult] = await Promise.all([
+    getPendingBillingDecisions(),
+    getClaimableTasks(),
+  ]);
 
-  if (!result.success) {
+  if (!result.success || !taskResult.success) {
     return (
       <div className="container mx-auto p-6">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <h2 className="text-lg font-semibold text-red-800">載入錯誤</h2>
-          <p className="text-red-600">{result.error}</p>
+          <p className="text-red-600">
+            {result.error || taskResult.error || '載入失敗'}
+          </p>
         </div>
       </div>
     );
@@ -27,7 +32,10 @@ export default async function BillingDashboardPage() {
           檢視待裁決的時數紀錄，進行合併裁決
         </p>
       </div>
-      <BillingDecisionBoard initialData={result.data || []} />
+      <BillingDecisionBoard
+        initialData={result.data || []}
+        taskOptions={taskResult.data || []}
+      />
     </div>
   );
 }

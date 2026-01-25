@@ -154,7 +154,8 @@ BEGIN
         FALSE, -- is_conflict_resolved
         NULL, -- conflict_resolution_notes
         TRUE, -- is_billable
-        ARRAY[]::UUID[] -- p_decision_ids_to_deactivate (第一次沒有舊決策)
+        ARRAY[]::UUID[], -- p_decision_ids_to_deactivate (第一次沒有舊決策)
+        v_task_id -- p_task_id
     ) INTO v_result;
 
     v_first_decision_id := (v_result->>'billing_decision_id')::UUID;
@@ -206,7 +207,8 @@ BEGIN
         FALSE, -- is_conflict_resolved
         NULL, -- conflict_resolution_notes
         TRUE, -- is_billable
-        ARRAY[v_first_decision_id]::UUID[] -- p_decision_ids_to_deactivate
+        ARRAY[v_first_decision_id]::UUID[], -- p_decision_ids_to_deactivate
+        v_task_id -- p_task_id
     ) INTO v_result;
 
     v_second_decision_id := (v_result->>'billing_decision_id')::UUID;
