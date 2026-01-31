@@ -1,4 +1,4 @@
-// File: C:\Users\Boya\Documents\GitHub\YCS\app\dashboard\billing\page.tsx
+// File: C:\Projects\YCS\app\dashboard\billing\page.tsx
 import * as entry from '../../../../../app/dashboard/billing/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
