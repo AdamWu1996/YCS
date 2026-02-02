@@ -17,8 +17,7 @@ DELETE FROM staff_profiles WHERE email = 'test_cai@example.com';
 -- 步驟 1: 建立測試資料
 -- ============================================
 
--- 建立測試員工（需要先有 auth.users，這裡假設已存在或使用現有資料）
--- 注意：實際執行時可能需要先建立 auth.users 或使用現有 user_id
+-- 建立測試員工（若有 seed/auth.users 則關聯 user_id，否則 user_id 為 NULL）
 DO $$
 DECLARE
     v_user_id UUID;
@@ -28,21 +27,17 @@ DECLARE
     v_tr_001_id UUID;
     v_tr_002_id UUID;
 BEGIN
-    -- 建立或取得測試用戶（簡化版，實際可能需要先建立 auth.users）
-    -- 這裡假設使用一個測試 UUID，實際執行時請替換為真實的 user_id
-    -- 或者先手動建立 auth.users 記錄
-    
-    -- 建立員工資料
+    -- 取得現有 auth 用戶（若無則為 NULL，不強迫報錯）
+    SELECT id INTO v_user_id FROM auth.users LIMIT 1;
+
+    -- 建立員工資料（user_id 可為 NULL，對應「先存在、後綁帳號」）
     INSERT INTO staff_profiles (user_id, name, email)
     VALUES (
-        COALESCE(
-            (SELECT id FROM auth.users LIMIT 1),
-            '00000000-0000-0000-0000-000000000001'::UUID
-        ),
+        v_user_id,
         '蔡哲維',
         'test_cai@example.com'
     )
-    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, user_id = COALESCE(EXCLUDED.user_id, staff_profiles.user_id)
     RETURNING id INTO v_staff_id;
 
     -- 建立測試專案
@@ -130,7 +125,7 @@ DECLARE
     v_old_record_count INTEGER;
     v_active_count INTEGER;
 BEGIN
-    -- 取得時數紀錄 IDs
+    -- 取得時數紀錄 IDs（步驟 1 已建立）
     SELECT id INTO v_tr_001_id FROM time_records WHERE notes = '測試紀錄 TR_001' LIMIT 1;
     SELECT id INTO v_tr_002_id FROM time_records WHERE notes = '測試紀錄 TR_002' LIMIT 1;
 
@@ -154,8 +149,7 @@ BEGIN
         FALSE, -- is_conflict_resolved
         NULL, -- conflict_resolution_notes
         TRUE, -- is_billable
-        ARRAY[]::UUID[], -- p_decision_ids_to_deactivate (第一次沒有舊決策)
-        v_task_id -- p_task_id
+        ARRAY[]::UUID[] -- p_decision_ids_to_deactivate (第一次沒有舊決策)
     ) INTO v_result;
 
     v_first_decision_id := (v_result->>'billing_decision_id')::UUID;
@@ -207,8 +201,7 @@ BEGIN
         FALSE, -- is_conflict_resolved
         NULL, -- conflict_resolution_notes
         TRUE, -- is_billable
-        ARRAY[v_first_decision_id]::UUID[], -- p_decision_ids_to_deactivate
-        v_task_id -- p_task_id
+        ARRAY[v_first_decision_id]::UUID[] -- p_decision_ids_to_deactivate
     ) INTO v_result;
 
     v_second_decision_id := (v_result->>'billing_decision_id')::UUID;

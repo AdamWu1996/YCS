@@ -1,4 +1,38 @@
+# Dependencies
 node_modules
 
-# local env files
+# Build / cache
+.next
+out
+.turbo
+*.tsbuildinfo
+
+# Environment
+.env
 .env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE (optional)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea
+
+# Logs / debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vercel
+.vercel
+
+# Test
+coverage
+
+# Accidental output in repo root (e.g. script redirects)
+deactivated_count
+records_created

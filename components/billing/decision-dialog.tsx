@@ -45,8 +45,12 @@ export function DecisionDialog({
   );
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /** 歸屬專案 (PY) = 先選專案再選任務；歸屬任務 (SR) = 直接選任務，系統自動帶出專案 */
+  const [claimMode, setClaimMode] = useState<'py' | 'sr'>('py');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState('');
+  /** SR 模式：任務搜尋關鍵字（過濾任務列表） */
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
 
   const projectOptions = useMemo(() => {
     const projectMap = new Map<string, { id: string; code: string; name: string }>();
@@ -70,6 +74,21 @@ export function DecisionDialog({
   const selectedTask = useMemo(() => {
     return taskOptions.find((task) => task.id === selectedTaskId) ?? null;
   }, [taskOptions, selectedTaskId]);
+
+  /** SR 模式：依關鍵字過濾的任務列表（顯示用） */
+  const filteredTasksForSr = useMemo(() => {
+    const q = taskSearchQuery.trim().toLowerCase();
+    if (!q) return taskOptions.sort((a, b) => a.code.localeCompare(b.code));
+    return taskOptions
+      .filter(
+        (t) =>
+          t.code.toLowerCase().includes(q) ||
+          (t.name && t.name.toLowerCase().includes(q)) ||
+          (t.project?.code && t.project.code.toLowerCase().includes(q)) ||
+          (t.project?.name && t.project.name.toLowerCase().includes(q))
+      )
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [taskOptions, taskSearchQuery]);
 
   const projectStats = useMemo(() => {
     if (!selectedProjectId) {
@@ -96,27 +115,29 @@ export function DecisionDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (projectOptions.length === 0) return;
-    if (!selectedProjectId) {
+    if (claimMode === 'py' && projectOptions.length > 0 && !selectedProjectId) {
       setSelectedProjectId(projectOptions[0].id);
     }
-  }, [open, projectOptions, selectedProjectId]);
+  }, [open, claimMode, projectOptions, selectedProjectId]);
 
   useEffect(() => {
     if (!open) return;
-    if (tasksForProject.length === 0) {
-      setSelectedTaskId('');
-      return;
+    if (claimMode === 'py') {
+      if (tasksForProject.length === 0) {
+        setSelectedTaskId('');
+        return;
+      }
+      if (!selectedTaskId || !tasksForProject.some((task) => task.id === selectedTaskId)) {
+        setSelectedTaskId(tasksForProject[0].id);
+      }
     }
-    if (!selectedTaskId || !tasksForProject.some((task) => task.id === selectedTaskId)) {
-      setSelectedTaskId(tasksForProject[0].id);
-    }
-  }, [open, tasksForProject, selectedTaskId]);
+  }, [open, claimMode, tasksForProject, selectedTaskId]);
 
   useEffect(() => {
     if (!open) return;
     setFinalMd(selectedSummary.recommendedMd.toString());
     setReason('');
+    setTaskSearchQuery('');
   }, [open, selectedSummary.recommendedMd]);
 
   const handleSubmit = async () => {
@@ -147,44 +168,110 @@ export function DecisionDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* 專案與任務選擇 */}
+          {/* PY / SR 互斥選擇 */}
           <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="project-select">專案 *</Label>
-              <Select
-                id="project-select"
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                disabled={projectOptions.length === 0}
-              >
-                {projectOptions.length === 0 && (
-                  <option value="">沒有可用專案</option>
-                )}
-                {projectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.code} {project.name}
-                  </option>
-                ))}
-              </Select>
+            <div className="flex items-center gap-2">
+              <Label className="shrink-0">歸屬</Label>
+              <div className="flex rounded-md border bg-muted/30 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setClaimMode('py')}
+                  className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                    claimMode === 'py'
+                      ? 'bg-background text-foreground shadow'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  專案 (PY)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClaimMode('sr')}
+                  className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                    claimMode === 'sr'
+                      ? 'bg-background text-foreground shadow'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  任務 (SR)
+                </button>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="task-select">任務 *</Label>
-              <Select
-                id="task-select"
-                value={selectedTaskId}
-                onChange={(e) => setSelectedTaskId(e.target.value)}
-                disabled={tasksForProject.length === 0}
-              >
-                {tasksForProject.length === 0 && (
-                  <option value="">沒有可用任務</option>
+
+            {claimMode === 'py' ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="project-select">專案 *</Label>
+                  <Select
+                    id="project-select"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    disabled={projectOptions.length === 0}
+                  >
+                    {projectOptions.length === 0 && (
+                      <option value="">沒有可用專案</option>
+                    )}
+                    {projectOptions.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.code} {project.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="task-select">任務 *</Label>
+                  <Select
+                    id="task-select"
+                    value={selectedTaskId}
+                    onChange={(e) => setSelectedTaskId(e.target.value)}
+                    disabled={tasksForProject.length === 0}
+                  >
+                    {tasksForProject.length === 0 && (
+                      <option value="">沒有可用任務</option>
+                    )}
+                    {tasksForProject.map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.code} {task.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="task-search-sr">任務 (SR) *</Label>
+                  <Input
+                    id="task-search-sr"
+                    type="text"
+                    value={taskSearchQuery}
+                    onChange={(e) => setTaskSearchQuery(e.target.value)}
+                    placeholder="搜尋任務代碼、名稱或專案..."
+                    className="mb-1"
+                  />
+                  <Select
+                    id="task-select-sr"
+                    value={selectedTaskId}
+                    onChange={(e) => setSelectedTaskId(e.target.value)}
+                    disabled={filteredTasksForSr.length === 0}
+                  >
+                    {filteredTasksForSr.length === 0 && (
+                      <option value="">{taskSearchQuery.trim() ? '無符合任務' : '沒有可用任務'}</option>
+                    )}
+                    {filteredTasksForSr.map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.project?.code ?? ''} / {task.code} {task.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                {selectedTask?.project && (
+                  <p className="text-xs text-muted-foreground">
+                    所屬專案：{selectedTask.project.code} {selectedTask.project.name}
+                  </p>
                 )}
-                {tasksForProject.map((task) => (
-                  <option key={task.id} value={task.id}>
-                    {task.code} {task.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+              </>
+            )}
           </div>
 
           {/* 摘要資訊 */}

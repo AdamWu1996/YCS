@@ -34,4 +34,19 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* 下拉選單選項背景，避免與背後文字重疊影響可讀性 */
+  select option {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  /* Popover 實心背景，避免與背後列表重疊影響可讀性（建立人員等浮層） */
+  .bg-popover {
+    background-color: hsl(var(--popover));
+  }
+  .text-popover-foreground {
+    color: hsl(var(--popover-foreground));
+  }
 }

@@ -2,12 +2,10 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
-/**
- * 匯入的時數紀錄資料型別
- */
+/** 單筆匯入用 payload，task_id 匯入時一律不寫入（公海池） */
 export interface ImportTimeRecord {
   staff_id: string;
-  task_id: string;
+  task_id?: string | null;
   record_date: string; // YYYY-MM-DD
   factory_location: string;
   check_in_time: string; // ISO 8601
@@ -15,9 +13,14 @@ export interface ImportTimeRecord {
   notes?: string;
 }
 
+const BATCH_SIZE = 150;
+const IMPORT_UNIQUE_KEY = 'staff_id,record_date,factory_location,check_in_time';
+
 /**
- * 匯入時數紀錄
- * 防重機制：若相同人員、日期、時間與廠區的紀錄已存在，則跳過該筆
+ * 匯入時數紀錄（批量 upsert）
+ * - 潔癖：duration < 5 分鐘的列不寫入，計入 skipped
+ * - 防重：依 uniq_time_records_import_key 衝突則跳過，計入 skipped
+ * - 公海池：匯入時 task_id 一律為 null
  */
 export async function importTimeRecords(
   records: ImportTimeRecord[]
@@ -31,80 +34,73 @@ export async function importTimeRecords(
   error?: string;
 }> {
   const supabase = createServerSupabaseClient();
+  const errors: string[] = [];
+  let imported = 0;
+  let skippedDuration = 0;
 
   try {
-    let imported = 0;
-    let skipped = 0;
-    const errors: string[] = [];
+    // 1) 潔癖：過濾 duration < 5 分鐘，並組出要寫入的列（task_id 強制 null）
+    const toInsert: Array<{
+      staff_id: string;
+      task_id: null;
+      record_date: string;
+      factory_location: string;
+      check_in_time: string;
+      check_out_time: string | null;
+      notes: string | null;
+    }> = [];
 
     for (const record of records) {
+      if (record.check_in_time && record.check_out_time) {
+        const checkIn = new Date(record.check_in_time);
+        const checkOut = new Date(record.check_out_time);
+        const durationMinutes = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60);
+        if (durationMinutes < 5) {
+          skippedDuration++;
+          continue;
+        }
+      }
+
+      toInsert.push({
+        staff_id: record.staff_id,
+        task_id: null, // 公海池：匯入時不寫入專案/任務，裁決中心再認領
+        record_date: record.record_date,
+        factory_location: record.factory_location,
+        check_in_time: record.check_in_time,
+        check_out_time: record.check_out_time,
+        notes: record.notes ?? null,
+      });
+    }
+
+    // 2) 分批 upsert（ON CONFLICT DO NOTHING），依回傳列數計入 imported
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const chunk = toInsert.slice(i, i + BATCH_SIZE);
       try {
-        // 潔癖行為：過濾小於 5 分鐘的雜訊數據
-        if (record.check_in_time && record.check_out_time) {
-          const checkIn = new Date(record.check_in_time);
-          const checkOut = new Date(record.check_out_time);
-          const durationMinutes = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60);
-          
-          if (durationMinutes < 5) {
-            skipped++;
-            continue; // 跳過小於 5 分鐘的數據
-          }
-        }
-
-        // 檢查是否已存在相同紀錄
-        // 防重條件：相同 staff_id、record_date、factory_location、check_in_time
-        const { data: existing, error: checkError } = await supabase
+        const { data, error } = await supabase
           .from('time_records')
-          .select('id')
-          .eq('staff_id', record.staff_id)
-          .eq('record_date', record.record_date)
-          .eq('factory_location', record.factory_location)
-          .eq('check_in_time', record.check_in_time)
-          .maybeSingle();
+          .upsert(chunk, {
+            onConflict: IMPORT_UNIQUE_KEY,
+            ignoreDuplicates: true,
+          })
+          .select('id');
 
-        if (checkError) {
-          errors.push(`檢查重複紀錄失敗: ${checkError.message}`);
+        if (error) {
+          errors.push(`批次 ${Math.floor(i / BATCH_SIZE) + 1} 寫入失敗: ${error.message}`);
           continue;
         }
-
-        if (existing) {
-          skipped++;
-          continue;
-        }
-
-        // 插入新紀錄
-        const { error: insertError } = await supabase
-          .from('time_records')
-          .insert({
-            staff_id: record.staff_id,
-            task_id: record.task_id,
-            record_date: record.record_date,
-            factory_location: record.factory_location,
-            check_in_time: record.check_in_time,
-            check_out_time: record.check_out_time,
-            notes: record.notes || null,
-          });
-
-        if (insertError) {
-          errors.push(`匯入失敗: ${insertError.message}`);
-          continue;
-        }
-
-        imported++;
-      } catch (error) {
-        errors.push(
-          `處理紀錄時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`
-        );
+        imported += data?.length ?? 0;
+      } catch (chunkError) {
+        const msg = chunkError instanceof Error ? chunkError.message : String(chunkError);
+        errors.push(`批次 ${Math.floor(i / BATCH_SIZE) + 1} 例外: ${msg}`);
       }
     }
 
+    const skippedDuplicates = toInsert.length - imported;
+    const skipped = skippedDuration + skippedDuplicates;
+
     return {
       success: true,
-      data: {
-        imported,
-        skipped,
-        errors,
-      },
+      data: { imported, skipped, errors },
     };
   } catch (error) {
     console.error('importTimeRecords 錯誤:', error);

@@ -26,14 +26,9 @@ DECLARE
     v_tr_002_id UUID;
     v_tr_003_id UUID;
 BEGIN
-    -- 建立或取得測試用戶
-    -- 使用現有的第一個 user_id，或使用預設 UUID
+    -- 取得現有 auth 用戶（若無則為 NULL，不強迫報錯；對應「先存在、後綁帳號」）
     SELECT id INTO v_user_id FROM auth.users LIMIT 1;
-    
-    IF v_user_id IS NULL THEN
-        v_user_id := '00000000-0000-0000-0000-000000000001'::UUID;
-    END IF;
-    
+
     -- 建立員工資料（許馨方）
     -- 先檢查是否已存在（透過 email）
     SELECT id INTO v_staff_id 

@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@radix-ui/react-popover": "^1.1.15",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.39.0",
     "clsx": "^2.1.0",
@@ -24,7 +25,7 @@
   "devDependencies": {
     "@types/react": "19.2.9",
     "@types/xlsx": "^0.0.35",
-    "supabase": "^2.72.8",
+    "supabase": "^2.74.4",
     "typescript": "5.9.3"
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,8 +8,21 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select } from '@/components/ui/select';
-import { getAllStaffProfiles, getTaskIdByCodes } from '@/actions/upload/queries';
+import { Label } from '@/components/ui/label';
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { getAllStaffProfiles } from '@/actions/upload/queries';
 import { importTimeRecords, ImportTimeRecord } from '@/actions/upload/import';
+import {
+  createStaffProfile,
+  ensureStaffProfileFromAuthUser,
+} from '@/actions/staff/createStaffProfile';
 import { toast } from 'sonner';
 
 type ExcelCell = string | number | Date | null | undefined;
@@ -141,7 +154,7 @@ const getMissingRequiredKeys = (
 };
 
 /**
- * Excel 解析後的原始資料型別
+ * Excel 解析後的原始資料型別（僅人員、日期、廠區、進出場時間；不含 PY/SR）
  */
 interface ParsedExcelRow {
   姓名: ExcelCell;
@@ -149,18 +162,15 @@ interface ParsedExcelRow {
   廠區: ExcelCell;
   進場時間: ExcelCell;
   出場時間: ExcelCell;
-  專案代碼?: ExcelCell;
-  任務代碼?: ExcelCell;
 }
 
 /**
- * 預覽表格的資料型別（含匹配狀態）
+ * 預覽表格的資料型別（含匹配狀態；匯入後 task_id 一律為 NULL，於裁決階段認領）
  */
 interface PreviewRow extends ParsedExcelRow {
   matchedStaffId: string | null;
   matchedStaffName: string | null;
   matchStatus: 'matched' | 'unmatched' | 'manual';
-  taskId: string | null;
 }
 
 const buildPreviewRows = (
@@ -186,9 +196,162 @@ const buildPreviewRows = (
       matchedStaffId: matched?.id || null,
       matchedStaffName: matched?.name || null,
       matchStatus: matched ? 'matched' : 'unmatched',
-      taskId: null,
     };
   });
+
+/** 未匹配列內嵌的「建立人員」Popover（新建帳號 or 連結既有 auth 帳號，不導頁） */
+function CreateStaffPopoverInRow({
+  rowIndex,
+  excelName,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  rowIndex: number;
+  excelName: ExcelCell;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: (excelName: ExcelCell, staffId: string, staffName: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [employeeNo, setEmployeeNo] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  /** 'create' = 新建 auth + staff；'link' = 僅連結既有 auth 建立 staff */
+  const [mode, setMode] = useState<'create' | 'link'>('create');
+  const displayName =
+    typeof excelName === 'string' ? excelName.trim() : String(excelName ?? '');
+
+  const handleSubmitCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      toast.error('請輸入 Email');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const result = await createStaffProfile({
+        name: displayName || trimmedEmail,
+        email: trimmedEmail,
+        employeeNo: employeeNo.trim() || undefined,
+      });
+      if (!result.success) {
+        toast.error(result.error ?? '建立人員失敗');
+        return;
+      }
+      if (result.data) {
+        onSuccess(excelName, result.data.id, result.data.name);
+        toast.success(`已建立人員：${result.data.name}`);
+        setEmail('');
+        setEmployeeNo('');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      toast.error('請輸入 Email');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const result = await ensureStaffProfileFromAuthUser({
+        name: displayName || trimmedEmail,
+        email: trimmedEmail,
+        employeeNo: employeeNo.trim() || undefined,
+      });
+      if (!result.success) {
+        toast.error(result.error ?? '連結失敗');
+        return;
+      }
+      if (result.data) {
+        onSuccess(excelName, result.data.id, result.data.name);
+        toast.success(`已連結人員：${result.data.name}`);
+        setEmail('');
+        setEmployeeNo('');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const isLink = mode === 'link';
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          建立人員
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80" align="start" side="right">
+        <PopoverHeader>
+          <PopoverTitle>建立人員：{displayName || '(未填姓名)'}</PopoverTitle>
+        </PopoverHeader>
+        <form
+          onSubmit={isLink ? handleSubmitLink : handleSubmitCreate}
+          className="mt-3 space-y-3"
+        >
+          <div>
+            <Label htmlFor={`create-email-${rowIndex}`}>Email（必填）</Label>
+            <Input
+              id={`create-email-${rowIndex}`}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@example.com"
+              required
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor={`create-employee-no-${rowIndex}`}>工號（選填）</Label>
+            <Input
+              id={`create-employee-no-${rowIndex}`}
+              type="text"
+              value={employeeNo}
+              onChange={(e) => setEmployeeNo(e.target.value)}
+              placeholder="選填"
+              className="mt-1"
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setMode(isLink ? 'create' : 'link')}
+            >
+              {isLink ? '改為新建帳號' : '已有帳號？連結既有帳號'}
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+              >
+                取消
+              </Button>
+              <Button type="submit" size="sm" disabled={isSubmitting}>
+                {isSubmitting
+                  ? '處理中...'
+                  : isLink
+                    ? '連結'
+                    : '確認'}
+              </Button>
+            </div>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Excel 匯入頁面
@@ -202,20 +365,28 @@ export default function UploadPage() {
   const [availableHeaders, setAvailableHeaders] = useState<string[]>([]);
   const [headerMap, setHeaderMap] = useState<Partial<Record<RequiredHeaderKey, string>>>({});
   const [headerSignature, setHeaderSignature] = useState<string | null>(null);
-  const [projectCode, setProjectCode] = useState('');
-  const [taskCode, setTaskCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  /** 匯入 session：同一匯入流程內，姓名 → 已匹配的 staff（建立或手動選擇後同步同名稱所有行，不寫入 DB） */
+  const [importSessionState, setImportSessionState] = useState<
+    Record<string, { staffId: string; staffName: string }>
+  >({});
+  /** 僅顯示未匹配人員（表格過濾） */
+  const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false);
+  /** 摘要區「建立人員」Popover 目前開啟的姓名 key */
+  const [summaryCreatePopoverKey, setSummaryCreatePopoverKey] = useState<string | null>(null);
 
-  // 載入員工資料
-  const loadStaffProfiles = async () => {
+  /** 載入員工資料；失敗時回傳 { success: false } 以便上傳流程不繼續、不顯示預覽 */
+  const loadStaffProfiles = async (): Promise<
+    { success: true; data: Array<{ id: string; name: string }> } | { success: false }
+  > => {
     const result = await getAllStaffProfiles();
     if (result.success && result.data) {
       setStaffProfiles(result.data);
-      return result.data;
+      return { success: true, data: result.data };
     }
     toast.error('載入員工資料失敗');
-    return [];
+    return { success: false };
   };
 
   // 姓名匹配邏輯（自動比對）
@@ -260,8 +431,13 @@ export default function UploadPage() {
     setIsLoading(true);
 
     try {
-      // 載入員工資料
-      const staffList = await loadStaffProfiles();
+      // 載入員工資料；失敗則不繼續，避免先顯示失敗又載入內容
+      const staffResult = await loadStaffProfiles();
+      if (!staffResult.success) {
+        setIsLoading(false);
+        return;
+      }
+      const staffList = staffResult.data;
 
       // 讀取 Excel
       const arrayBuffer = await file.arrayBuffer();
@@ -290,13 +466,15 @@ export default function UploadPage() {
       setRawRows(jsonData);
       setHeaderMap(resolvedMap);
       setHeaderSignature(signature);
+      setImportSessionState({});
+      setCreateStaffPopoverIndex(null);
 
       const previewRows = buildPreviewRows(jsonData, resolvedMap, staffList, matchStaffName);
       setPreviewData(previewRows);
 
       const missingRequired = getMissingRequiredKeys(resolvedMap);
       if (missingRequired.length > 0) {
-        toast.error(`缺少必要欄位: ${missingRequired.join('、')}，請於欄位對應修正`);
+        toast.warning(`請於下方欄位對應完成：${missingRequired.join('、')}`);
       } else {
         toast.success(`已解析 ${previewRows.length} 筆資料`);
       }
@@ -319,22 +497,97 @@ export default function UploadPage() {
       persistHeaderMap(headerSignature, nextMap);
     }
     const previewRows = buildPreviewRows(rawRows, nextMap, staffProfiles, matchStaffName);
-    setPreviewData(previewRows);
+    const withSession = previewRows.map((r) => {
+      const key = nameKey(r.姓名);
+      const session = key ? importSessionState[key] : undefined;
+      if (session && !r.matchedStaffId) {
+        return {
+          ...r,
+          matchedStaffId: session.staffId,
+          matchedStaffName: session.staffName,
+          matchStatus: 'manual' as const,
+        };
+      }
+      return r;
+    });
+    setPreviewData(withSession);
   };
 
-  // 手動選擇員工
-  const handleStaffSelect = (index: number, staffId: string) => {
+  /** 用於匯入 session 的姓名 key（同名稱同步） */
+  const nameKey = (excelName: ExcelCell) =>
+    typeof excelName === 'string' ? excelName.trim().toLowerCase() : '';
+
+  /** 未匹配人員的唯一姓名列表（用於摘要看板） */
+  const unmatchedUniqueNames = useMemo(() => {
+    const seen = new Set<string>();
+    const list: ExcelCell[] = [];
+    for (const row of previewData) {
+      if (row.matchStatus !== 'unmatched') continue;
+      const key = nameKey(row.姓名);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      list.push(row.姓名);
+    }
+    return list;
+  }, [previewData]);
+
+  /** 全域同步：依 Excel 姓名將所有同名列一併更新為指定 staff（摘要區或表格選擇後共用） */
+  const handleGlobalStaffSync = (excelName: ExcelCell, staffId: string) => {
     const staff = staffProfiles.find((s) => s.id === staffId);
     if (!staff) return;
+    const key = nameKey(excelName);
+    if (!key) return;
+    setImportSessionState((prev) => ({
+      ...prev,
+      [key]: { staffId: staff.id, staffName: staff.name },
+    }));
+    setPreviewData((prev) =>
+      prev.map((r) =>
+        nameKey(r.姓名) === key
+          ? {
+              ...r,
+              matchedStaffId: staff.id,
+              matchedStaffName: staff.name,
+              matchStatus: 'manual',
+            }
+          : r
+      )
+    );
+  };
 
-    const updated = [...previewData];
-    updated[index] = {
-      ...updated[index],
-      matchedStaffId: staff.id,
-      matchedStaffName: staff.name,
-      matchStatus: 'manual',
-    };
-    setPreviewData(updated);
+  /** 未匹配行的「建立人員」Popover 是否開啟（由列 index 控制） */
+  const [createStaffPopoverIndex, setCreateStaffPopoverIndex] = useState<number | null>(null);
+
+  /** 建立人員成功後：加入 staff 列表、更新 session、同步同名稱行、關閉 Popover */
+  const handleCreateStaffSuccess = (
+    excelName: ExcelCell,
+    staffId: string,
+    staffName: string
+  ) => {
+    const key = nameKey(excelName);
+    if (!key) return;
+    setStaffProfiles((prev) => {
+      if (prev.some((s) => s.id === staffId)) return prev;
+      return [...prev, { id: staffId, name: staffName }];
+    });
+    setImportSessionState((prev) => ({
+      ...prev,
+      [key]: { staffId, staffName },
+    }));
+    setPreviewData((prev) =>
+      prev.map((r) =>
+        nameKey(r.姓名) === key
+          ? {
+              ...r,
+              matchedStaffId: staffId,
+              matchedStaffName: staffName,
+              matchStatus: 'manual',
+            }
+          : r
+      )
+    );
+    setCreateStaffPopoverIndex(null);
+    setSummaryCreatePopoverKey(null);
   };
 
   const pad2 = (value: number) => String(value).padStart(2, '0');
@@ -506,13 +759,8 @@ export default function UploadPage() {
     return parsed;
   };
 
-  // 執行匯入
+  // 執行匯入（先匯入、後認領：time_records.task_id 一律為 NULL）
   const handleImport = async () => {
-    if (!projectCode || !taskCode) {
-      toast.error('請輸入專案代碼和任務代碼');
-      return;
-    }
-
     const missingMappings = getMissingRequiredKeys(headerMap);
     if (missingMappings.length > 0) {
       toast.error(`請先完成欄位對應: ${missingMappings.join('、')}`);
@@ -529,17 +777,7 @@ export default function UploadPage() {
     setIsImporting(true);
 
     try {
-      // 取得 task_id
-      const taskResult = await getTaskIdByCodes(projectCode, taskCode);
-      if (!taskResult.success || !taskResult.data) {
-        toast.error(taskResult.error || '找不到對應的任務');
-        setIsImporting(false);
-        return;
-      }
-
-      const taskId = taskResult.data;
-
-      // 準備匯入資料
+      // 準備匯入資料（task_id 一律為 null，於裁決中心認領）
       const importRecords: ImportTimeRecord[] = previewData.map((row) => {
         const recordDate = resolveRecordDate(row);
         const checkInTime = resolveDateTime(row.日期 ?? row.進場時間, row.進場時間);
@@ -556,7 +794,6 @@ export default function UploadPage() {
         const displayName = normalizeText(row.姓名);
         return {
           staff_id: row.matchedStaffId!,
-          task_id: taskId,
           record_date: recordDate,
           factory_location: normalizeText(row.廠區),
           check_in_time: checkInTime,
@@ -618,25 +855,6 @@ export default function UploadPage() {
             onChange={handleFileUpload}
             disabled={isLoading}
           />
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium mb-2 block">專案代碼 (PY)</label>
-              <Input
-                value={projectCode}
-                onChange={(e) => setProjectCode(e.target.value)}
-                placeholder="例如: PY001"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-2 block">任務代碼 (SR)</label>
-              <Input
-                value={taskCode}
-                onChange={(e) => setTaskCode(e.target.value)}
-                placeholder="例如: SR001"
-              />
-            </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -678,10 +896,11 @@ export default function UploadPage() {
                           onChange={(event) =>
                             handleHeaderMappingChange(definition.key, event.target.value)
                           }
+                          className="bg-background"
                         >
-                          <option value="">(未選擇)</option>
+                          <option value="" className="bg-background">(未選擇)</option>
                           {availableHeaders.map((header) => (
-                            <option key={header} value={header}>
+                            <option key={header} value={header} className="bg-background">
                               {header}
                             </option>
                           ))}
@@ -697,6 +916,67 @@ export default function UploadPage() {
                 </div>
               </div>
             )}
+            {unmatchedUniqueNames.length > 0 && (
+              <Card className="mb-4 border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/30">
+                <CardHeader className="py-3">
+                  <CardTitle className="text-base">未匹配人員摘要</CardTitle>
+                  <CardDescription>
+                    以下姓名尚未對應到系統人員，可在此手動選擇或原地建立後，表格中同姓名列會一併更新
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="py-3">
+                  <ul className="flex flex-wrap gap-3">
+                    {unmatchedUniqueNames.map((excelName, i) => {
+                      const displayName =
+                        typeof excelName === 'string' ? excelName.trim() : String(excelName ?? '');
+                      const key = nameKey(excelName);
+                      return (
+                        <li
+                          key={key || i}
+                          className="flex items-center gap-2 rounded-md border bg-background px-3 py-2"
+                        >
+                          <span className="font-medium text-foreground">{displayName || '(未填)'}</span>
+                          <Select
+                            value=""
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              if (id) handleGlobalStaffSync(excelName, id);
+                            }}
+                            className="w-40 bg-background"
+                          >
+                            <option value="" className="bg-background">手動選擇...</option>
+                            {staffProfiles.map((staff) => (
+                              <option key={staff.id} value={staff.id} className="bg-background">
+                                {staff.name}
+                              </option>
+                            ))}
+                          </Select>
+                          <CreateStaffPopoverInRow
+                            rowIndex={i}
+                            excelName={excelName}
+                            open={summaryCreatePopoverKey === key}
+                            onOpenChange={(open) =>
+                              setSummaryCreatePopoverKey(open ? key : null)
+                            }
+                            onSuccess={handleCreateStaffSuccess}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+            <div className="mb-2 flex items-center gap-2">
+              <Checkbox
+                id="filter-unmatched"
+                checked={showUnmatchedOnly}
+                onCheckedChange={(checked) => setShowUnmatchedOnly(checked === true)}
+              />
+              <Label htmlFor="filter-unmatched" className="cursor-pointer text-sm">
+                僅顯示未匹配人員
+              </Label>
+            </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -711,7 +991,12 @@ export default function UploadPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {previewData.map((row, index) => (
+                  {(showUnmatchedOnly
+                    ? previewData
+                        .map((row, index) => ({ row, index }))
+                        .filter(({ row }) => row.matchStatus === 'unmatched')
+                    : previewData.map((row, index) => ({ row, index }))
+                  ).map(({ row, index }) => (
                     <TableRow key={index}>
                       <TableCell>{normalizeText(row.姓名) || '-'}</TableCell>
                       <TableCell>
@@ -732,17 +1017,38 @@ export default function UploadPage() {
                           <span className="text-blue-600">✓ 手動選擇: {row.matchedStaffName}</span>
                         )}
                         {row.matchStatus === 'unmatched' && (
-                          <span className="text-red-600">✗ 未匹配</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-red-600">✗ 未匹配</span>
+                            <CreateStaffPopoverInRow
+                              rowIndex={index}
+                              excelName={row.姓名}
+                              open={createStaffPopoverIndex === index}
+                              onOpenChange={(open) =>
+                                setCreateStaffPopoverIndex(open ? index : null)
+                              }
+                              onSuccess={handleCreateStaffSuccess}
+                            />
+                          </div>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="bg-background">
                         <Select
                           value={row.matchedStaffId || ''}
-                          onChange={(e) => handleStaffSelect(index, e.target.value)}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id) handleGlobalStaffSync(row.姓名, id);
+                          }}
+                          className="bg-background"
                         >
-                          <option value="">請選擇...</option>
+                          <option value="" className="bg-background">
+                            請選擇...
+                          </option>
                           {staffProfiles.map((staff) => (
-                            <option key={staff.id} value={staff.id}>
+                            <option
+                              key={staff.id}
+                              value={staff.id}
+                              className="bg-background text-foreground"
+                            >
                               {staff.name}
                             </option>
                           ))}

@@ -16,6 +16,7 @@ CREATE TABLE staff_profiles (
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     email TEXT NOT NULL,
+    employee_no TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(user_id),
@@ -23,6 +24,18 @@ CREATE TABLE staff_profiles (
 );
 CREATE INDEX idx_staff_profiles_user_id ON staff_profiles(user_id);
 CREATE INDEX idx_staff_profiles_email ON staff_profiles(email);
+COMMENT ON COLUMN staff_profiles.employee_no IS '工號（選填）';
+
+-- staff_profiles 存取策略（與 migration 008 一致）
+ALTER TABLE staff_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "staff_profiles_select_authenticated"
+  ON staff_profiles FOR SELECT TO authenticated USING (true);
+CREATE POLICY "staff_profiles_insert_service_role"
+  ON staff_profiles FOR INSERT TO service_role WITH CHECK (true);
+CREATE POLICY "staff_profiles_update_service_role"
+  ON staff_profiles FOR UPDATE TO service_role USING (true) WITH CHECK (true);
+GRANT SELECT ON public.staff_profiles TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.staff_profiles TO service_role;
 
 -- 2. 專案表 (projects - PY)
 CREATE TABLE projects (
@@ -71,6 +84,8 @@ CREATE INDEX idx_time_records_staff_date ON time_records(staff_id, record_date);
 CREATE INDEX idx_time_records_staff_date_factory ON time_records(staff_id, record_date, factory_location);
 CREATE INDEX idx_time_records_task_id ON time_records(task_id);
 CREATE INDEX idx_time_records_check_out ON time_records(check_out_time) WHERE check_out_time IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_time_records_import_key
+ON time_records (staff_id, record_date, factory_location, check_in_time);
 
 -- 5. 計費裁決表 (billing_decisions)
 CREATE TABLE billing_decisions (

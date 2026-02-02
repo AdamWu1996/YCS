@@ -12,7 +12,9 @@ export interface StaffProfile {
 }
 
 /**
- * 查詢所有員工資料（用於人員匹配）
+ * 查詢所有員工資料（用於人員匹配）。
+ * 使用 Service Role client（createServerSupabaseClient），僅由 Server Action 呼叫；
+ * 前端不直接查詢 staff_profiles，且需配合 RLS/GRANT（見 migration 008）以支援空表與首次上傳。
  */
 export async function getAllStaffProfiles(): Promise<{
   success: boolean;
