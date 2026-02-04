@@ -57,7 +57,8 @@ export function BillingDecisionBoard({
   const selectedSummary = useMemo(() => {
     const selected = data.filter((item) => selectedIds.has(item.time_record_id));
     const totalHours = selected.reduce((sum, item) => sum + (item.hours_worked || 0), 0);
-    const recommendedMd = totalHours >= 4 ? 1.0 : 0.5;
+    const recommendedMd =
+      totalHours >= 7.5 ? 1.0 : totalHours >= 3.5 ? 0.5 : 0;
     const hasConflict = selected.some((item) => item.has_conflict);
 
     return {

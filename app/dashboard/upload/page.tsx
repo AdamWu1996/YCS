@@ -373,8 +373,12 @@ export default function UploadPage() {
   >({});
   /** 僅顯示未匹配人員（表格過濾） */
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false);
-  /** 摘要區「建立人員」Popover 目前開啟的姓名 key */
-  const [summaryCreatePopoverKey, setSummaryCreatePopoverKey] = useState<string | null>(null);
+  /** 摘要區批次建立：每個未匹配姓名 key → { email, employeeNo }，直接顯示欄位一次填完再批次建立 */
+  const [batchCreateForm, setBatchCreateForm] = useState<
+    Record<string, { email: string; employeeNo: string }>
+  >({});
+  /** 批次建立中（按鈕 disabled） */
+  const [isBatchCreating, setIsBatchCreating] = useState(false);
 
   /** 載入員工資料；失敗時回傳 { success: false } 以便上傳流程不繼續、不顯示預覽 */
   const loadStaffProfiles = async (): Promise<
@@ -468,6 +472,7 @@ export default function UploadPage() {
       setHeaderSignature(signature);
       setImportSessionState({});
       setCreateStaffPopoverIndex(null);
+      setBatchCreateForm({});
 
       const previewRows = buildPreviewRows(jsonData, resolvedMap, staffList, matchStaffName);
       setPreviewData(previewRows);
@@ -587,7 +592,66 @@ export default function UploadPage() {
       )
     );
     setCreateStaffPopoverIndex(null);
-    setSummaryCreatePopoverKey(null);
+    setBatchCreateForm((prev) => {
+      const key = nameKey(excelName);
+      if (!key) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  /** 摘要區批次建立：對所有已填 Email 的未匹配姓名依序建立人員，完成後一次提示 */
+  const handleBatchCreate = async () => {
+    const toCreate: { key: string; excelName: ExcelCell; email: string; employeeNo: string }[] = [];
+    for (const excelName of unmatchedUniqueNames) {
+      const key = nameKey(excelName);
+      if (!key) continue;
+      const form = batchCreateForm[key] ?? { email: '', employeeNo: '' };
+      const email = form.email.trim();
+      if (!email) continue;
+      toCreate.push({
+        key,
+        excelName,
+        email,
+        employeeNo: form.employeeNo.trim() || '',
+      });
+    }
+    if (toCreate.length === 0) {
+      toast.error('請至少為一位未匹配人員填寫 Email');
+      return;
+    }
+    setIsBatchCreating(true);
+    const displayName = (n: ExcelCell) =>
+      typeof n === 'string' ? n.trim() : String(n ?? '');
+    const succeeded: string[] = [];
+    const failed: { name: string; error: string }[] = [];
+    try {
+      for (const { key, excelName, email, employeeNo } of toCreate) {
+        const result = await createStaffProfile({
+          name: displayName(excelName) || email,
+          email,
+          employeeNo: employeeNo || undefined,
+        });
+        if (result.success && result.data) {
+          succeeded.push(result.data.name);
+          handleCreateStaffSuccess(excelName, result.data.id, result.data.name);
+        } else {
+          failed.push({ name: displayName(excelName) || email, error: result.error ?? '建立失敗' });
+        }
+      }
+      if (succeeded.length > 0) {
+        toast.success(
+          `已建立 ${succeeded.length} 位人員${failed.length > 0 ? `；${failed.length} 位失敗` : ''}`,
+          { duration: 3000 }
+        );
+      }
+      if (failed.length > 0 && succeeded.length === 0) {
+        toast.error(failed.map((f) => `${f.name}: ${f.error}`).join('；'));
+      }
+    } finally {
+      setIsBatchCreating(false);
+    }
   };
 
   const pad2 = (value: number) => String(value).padStart(2, '0');
@@ -811,14 +875,22 @@ export default function UploadPage() {
         return;
       }
 
-      const { imported, skipped, errors } = result.data!;
+      const { imported, skipped, errors, skippedNoCheckOut, skippedDuration, skippedDuplicates } =
+        result.data!;
 
       if (errors.length > 0) {
         console.error('匯入錯誤:', errors);
       }
 
+      const skipParts: string[] = [];
+      if ((skippedNoCheckOut ?? 0) > 0) skipParts.push(`缺出場時間 ${skippedNoCheckOut} 筆`);
+      if ((skippedDuration ?? 0) > 0) skipParts.push(`時長<5分 ${skippedDuration} 筆`);
+      if ((skippedDuplicates ?? 0) > 0) skipParts.push(`重複 ${skippedDuplicates} 筆`);
+      const skipMsg =
+        skipParts.length > 0 ? `，跳過: ${skipParts.join('、')}` : skipped > 0 ? `，跳過: ${skipped} 筆` : '';
+
       toast.success(
-        `匯入完成！成功: ${imported} 筆，跳過: ${skipped} 筆${errors.length > 0 ? `，錯誤: ${errors.length} 筆` : ''}`
+        `匯入完成！成功: ${imported} 筆${skipMsg}${errors.length > 0 ? `，錯誤: ${errors.length} 筆` : ''}`
       );
 
       // 導向 billing 看板
@@ -910,6 +982,11 @@ export default function UploadPage() {
                             未提供日期時，會從進場時間自動推導
                           </p>
                         )}
+                        {definition.key === '出場時間' && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            未對應或空值時，該列不會匯入，也不會出現在裁決看板
+                          </p>
+                        )}
                       </div>
                     );
                   })}
@@ -921,49 +998,90 @@ export default function UploadPage() {
                 <CardHeader className="py-3">
                   <CardTitle className="text-base">未匹配人員摘要</CardTitle>
                   <CardDescription>
-                    以下姓名尚未對應到系統人員，可在此手動選擇或原地建立後，表格中同姓名列會一併更新
+                    以下姓名尚未對應到系統人員。可「手動選擇」既有人員，或填寫 Email／工號後按「批次建立」一次建立；表格中同姓名列會一併更新
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="py-3">
-                  <ul className="flex flex-wrap gap-3">
-                    {unmatchedUniqueNames.map((excelName, i) => {
-                      const displayName =
-                        typeof excelName === 'string' ? excelName.trim() : String(excelName ?? '');
-                      const key = nameKey(excelName);
-                      return (
-                        <li
-                          key={key || i}
-                          className="flex items-center gap-2 rounded-md border bg-background px-3 py-2"
-                        >
-                          <span className="font-medium text-foreground">{displayName || '(未填)'}</span>
-                          <Select
-                            value=""
-                            onChange={(e) => {
-                              const id = e.target.value;
-                              if (id) handleGlobalStaffSync(excelName, id);
-                            }}
-                            className="w-40 bg-background"
-                          >
-                            <option value="" className="bg-background">手動選擇...</option>
-                            {staffProfiles.map((staff) => (
-                              <option key={staff.id} value={staff.id} className="bg-background">
-                                {staff.name}
-                              </option>
-                            ))}
-                          </Select>
-                          <CreateStaffPopoverInRow
-                            rowIndex={i}
-                            excelName={excelName}
-                            open={summaryCreatePopoverKey === key}
-                            onOpenChange={(open) =>
-                              setSummaryCreatePopoverKey(open ? key : null)
-                            }
-                            onSuccess={handleCreateStaffSuccess}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-28">姓名</TableHead>
+                          <TableHead className="min-w-[200px]">Email（建立用）</TableHead>
+                          <TableHead className="min-w-[100px]">工號（選填）</TableHead>
+                          <TableHead className="w-44">或手動選擇</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {unmatchedUniqueNames.map((excelName, i) => {
+                          const displayName =
+                            typeof excelName === 'string' ? excelName.trim() : String(excelName ?? '');
+                          const key = nameKey(excelName);
+                          const form = batchCreateForm[key] ?? { email: '', employeeNo: '' };
+                          return (
+                            <TableRow key={key || i}>
+                              <TableCell className="font-medium">{displayName || '(未填)'}</TableCell>
+                              <TableCell>
+                                <Input
+                                  type="email"
+                                  placeholder="name@example.com"
+                                  value={form.email}
+                                  onChange={(e) =>
+                                    setBatchCreateForm((prev) => ({
+                                      ...prev,
+                                      [key]: { ...form, email: e.target.value },
+                                    }))
+                                  }
+                                  className="h-8 bg-background"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="text"
+                                  placeholder="選填"
+                                  value={form.employeeNo}
+                                  onChange={(e) =>
+                                    setBatchCreateForm((prev) => ({
+                                      ...prev,
+                                      [key]: { ...form, employeeNo: e.target.value },
+                                    }))
+                                  }
+                                  className="h-8 bg-background"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Select
+                                  value=""
+                                  onChange={(e) => {
+                                    const id = e.target.value;
+                                    if (id) handleGlobalStaffSync(excelName, id);
+                                  }}
+                                  className="h-8 w-full bg-background"
+                                >
+                                  <option value="" className="bg-background">選擇既有人員...</option>
+                                  {staffProfiles.map((staff) => (
+                                    <option key={staff.id} value={staff.id} className="bg-background">
+                                      {staff.name}
+                                    </option>
+                                  ))}
+                                </Select>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleBatchCreate}
+                      disabled={isBatchCreating}
+                    >
+                      {isBatchCreating ? '建立中...' : '批次建立（已填 Email 的人員）'}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}

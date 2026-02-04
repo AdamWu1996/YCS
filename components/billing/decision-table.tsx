@@ -11,24 +11,19 @@ import {
 } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-// 日期格式化輔助函數
+const pad2 = (n: number) => String(n).padStart(2, '0');
 function formatDate(date: string | Date, formatStr: string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return '-';
-  
   if (formatStr === 'yyyy/MM/dd') {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}/${month}/${day}`;
+    return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
   }
-  
   if (formatStr === 'HH:mm') {
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   }
-  
+  if (formatStr === 'yyyy/MM/dd HH:mm') {
+    return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
   return d.toLocaleDateString('zh-TW');
 }
 
@@ -96,12 +91,16 @@ export function DecisionTable({
               />
             </TableHead>
             <TableHead>狀態</TableHead>
+            <TableHead>所屬廠區</TableHead>
+            <TableHead>廠商編號</TableHead>
+            <TableHead>實際入廠日期時間</TableHead>
+            <TableHead>實際出廠日期時間</TableHead>
+            <TableHead>部門名稱</TableHead>
+            <TableHead>廠商姓名</TableHead>
+            <TableHead>工作區域代號</TableHead>
             <TableHead>日期</TableHead>
             <TableHead>任務</TableHead>
-            <TableHead>廠區</TableHead>
             <TableHead>時數</TableHead>
-            <TableHead>進場時間</TableHead>
-            <TableHead>出場時間</TableHead>
             <TableHead>MD</TableHead>
             <TableHead>備註</TableHead>
           </TableRow>
@@ -144,18 +143,26 @@ export function DecisionTable({
                     {status.color === 'green' && '🟢'} {status.label}
                   </Badge>
                 </TableCell>
+                <TableCell>{item.factory_location}</TableCell>
+                <TableCell>{item.staff_employee_no ?? '-'}</TableCell>
+                <TableCell>
+                  {item.check_in_time
+                    ? formatDate(item.check_in_time, 'yyyy/MM/dd HH:mm')
+                    : '-'}
+                </TableCell>
+                <TableCell>
+                  {item.check_out_time
+                    ? formatDate(item.check_out_time, 'yyyy/MM/dd HH:mm')
+                    : '-'}
+                </TableCell>
+                <TableCell>{item.department_name ?? '-'}</TableCell>
+                <TableCell>{item.staff_name ?? '-'}</TableCell>
+                <TableCell>{item.work_area_code ?? '-'}</TableCell>
                 <TableCell>
                   {formatDate(item.record_date, 'yyyy/MM/dd')}
                 </TableCell>
                 <TableCell className="text-sm">{taskLabel}</TableCell>
-                <TableCell>{item.factory_location}</TableCell>
                 <TableCell>{item.hours_worked?.toFixed(2) || '0.00'}</TableCell>
-                <TableCell>
-                  {item.check_in_time ? formatDate(item.check_in_time, 'HH:mm') : '-'}
-                </TableCell>
-                <TableCell>
-                  {item.check_out_time ? formatDate(item.check_out_time, 'HH:mm') : '-'}
-                </TableCell>
                 <TableCell>
                   {item.final_md !== null ? item.final_md.toFixed(1) : '-'}
                 </TableCell>

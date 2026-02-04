@@ -29,6 +29,9 @@ export async function importTimeRecords(
   data?: {
     imported: number;
     skipped: number;
+    skippedNoCheckOut?: number;
+    skippedDuration?: number;
+    skippedDuplicates?: number;
     errors: string[];
   };
   error?: string;
@@ -37,28 +40,32 @@ export async function importTimeRecords(
   const errors: string[] = [];
   let imported = 0;
   let skippedDuration = 0;
+  let skippedNoCheckOut = 0;
 
   try {
-    // 1) 潔癖：過濾 duration < 5 分鐘，並組出要寫入的列（task_id 強制 null）
+    // 1) 潔癖 + 裁決可見：僅寫入「有出場時間」且 duration >= 5 分鐘的列（task_id 強制 null）
+    //    缺出場時間的列不寫入，否則裁決看板 View（pending_billing_decisions_summary）不會顯示
     const toInsert: Array<{
       staff_id: string;
       task_id: null;
       record_date: string;
       factory_location: string;
       check_in_time: string;
-      check_out_time: string | null;
+      check_out_time: string;
       notes: string | null;
     }> = [];
 
     for (const record of records) {
-      if (record.check_in_time && record.check_out_time) {
-        const checkIn = new Date(record.check_in_time);
-        const checkOut = new Date(record.check_out_time);
-        const durationMinutes = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60);
-        if (durationMinutes < 5) {
-          skippedDuration++;
-          continue;
-        }
+      if (!record.check_in_time || !record.check_out_time) {
+        skippedNoCheckOut++;
+        continue;
+      }
+      const checkIn = new Date(record.check_in_time);
+      const checkOut = new Date(record.check_out_time);
+      const durationMinutes = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60);
+      if (durationMinutes < 5) {
+        skippedDuration++;
+        continue;
       }
 
       toInsert.push({
@@ -96,11 +103,18 @@ export async function importTimeRecords(
     }
 
     const skippedDuplicates = toInsert.length - imported;
-    const skipped = skippedDuration + skippedDuplicates;
+    const skipped = skippedNoCheckOut + skippedDuration + skippedDuplicates;
 
     return {
       success: true,
-      data: { imported, skipped, errors },
+      data: {
+        imported,
+        skipped,
+        skippedNoCheckOut,
+        skippedDuration,
+        skippedDuplicates,
+        errors,
+      },
     };
   } catch (error) {
     console.error('importTimeRecords 錯誤:', error);

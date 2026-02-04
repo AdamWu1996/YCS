@@ -22,6 +22,10 @@ export interface PendingBillingDecision {
   final_md: number | null;
   has_decision: boolean;
   merged_total_hours: number | null;
+  staff_name: string | null;
+  staff_employee_no: string | null;
+  department_name: string | null;
+  work_area_code: string | null;
 }
 
 /**
@@ -56,7 +60,8 @@ export async function getPendingBillingDecisions(): Promise<{
       .from('pending_billing_decisions_summary')
       .select('*')
       .order('record_date', { ascending: false })
-      .order('check_in_time', { ascending: false });
+      .order('check_in_time', { ascending: false })
+      .range(0, 1999);
 
     if (error) {
       throw new Error(`查詢待裁決紀錄失敗: ${error.message}`);

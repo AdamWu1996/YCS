@@ -94,6 +94,6 @@ EXCEPTION
 END;
 $$;
 
--- 添加註解
-COMMENT ON FUNCTION create_billing_decision_transaction IS 
+-- 添加註解（指定完整簽名，避免多載時 "function name is not unique"）
+COMMENT ON FUNCTION create_billing_decision_transaction(uuid[], text, decimal, decimal, boolean, text, uuid, boolean, text, boolean, text, boolean, uuid[]) IS 
 '建立計費裁決的 Transaction Function，確保整個流程（停用舊決策、建立新決策、建立關聯記錄）在單一 Transaction 中完成';

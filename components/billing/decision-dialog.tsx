@@ -337,14 +337,20 @@ export function DecisionDialog({
               id="final-md"
               type="number"
               step="0.1"
-              min="0.5"
+              min="0"
               max="10"
               value={finalMd}
               onChange={(e) => setFinalMd(e.target.value)}
               placeholder="輸入最終 MD 值"
             />
             <p className="text-xs text-muted-foreground">
-              建議值：{selectedSummary.recommendedMd}（{selectedSummary.totalHours >= 4 ? '>=4 小時' : '<4 小時'}）
+              建議值：{selectedSummary.recommendedMd}（
+              {selectedSummary.totalHours >= 7.5
+                ? '≥7.5h → 1 MD'
+                : selectedSummary.totalHours >= 3.5
+                  ? '3.5~7h → 0.5 MD'
+                  : '<3.5h → 0 MD'}
+              ）
             </p>
           </div>
 

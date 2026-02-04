@@ -1,6 +1,9 @@
 import { getClaimableTasks, getPendingBillingDecisions } from '@/actions/billing/queries';
 import { BillingDecisionBoard } from '@/components/billing/decision-board';
 
+/** 避免快取導致裁決看板顯示舊/空資料 */
+export const dynamic = 'force-dynamic';
+
 /**
  * 請款裁決看板頁面
  * PM 使用的請款裁決介面，顯示待裁決的時數紀錄並允許進行裁決
