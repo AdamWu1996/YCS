@@ -7,12 +7,14 @@ import { cookies } from 'next/headers';
  * 使用服務端金鑰，具備完整資料庫權限
  */
 export function createServerSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  // Server-side runtime env first (avoid NEXT_PUBLIC being inlined at build time)
+  const supabaseUrl =
+    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseServiceKey) {
     const missing = [
-      !supabaseUrl && 'NEXT_PUBLIC_SUPABASE_URL',
+      !supabaseUrl && 'SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)',
       !supabaseServiceKey && 'SUPABASE_SERVICE_ROLE_KEY',
     ].filter(Boolean);
     throw new Error(
@@ -34,13 +36,16 @@ export function createServerSupabaseClient() {
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Server-side runtime env first (avoid NEXT_PUBLIC being inlined at build time)
+  const supabaseUrl =
+    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey =
+    process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
     const missing = [
-      !supabaseUrl && 'NEXT_PUBLIC_SUPABASE_URL',
-      !supabaseAnonKey && 'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+      !supabaseUrl && 'SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)',
+      !supabaseAnonKey && 'SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY)',
     ].filter(Boolean);
     throw new Error(
       `Missing Supabase env: ${missing.join(', ')}. 請在專案根目錄建立 .env.local 並重啟 dev server。`

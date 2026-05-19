@@ -3,7 +3,7 @@ import { Toaster } from 'sonner';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'NSF - middl',
+  title: '輕鬆要錢',
   description: '公司內部中介層與工具平台',
 };
 

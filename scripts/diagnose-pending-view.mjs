@@ -20,10 +20,12 @@ if (existsSync(envPath)) {
   }
 }
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) {
-  console.error('缺少 NEXT_PUBLIC_SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY（請設於 .env.local）');
+  console.error(
+    '缺少 SUPABASE_URL（或 NEXT_PUBLIC_SUPABASE_URL）或 SUPABASE_SERVICE_ROLE_KEY（請設於 .env.local）'
+  );
   process.exit(1);
 }
 

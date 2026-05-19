@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "target": "ES2018",  // 補上這一行，讓編譯器認識 2018 年以後的語法
     "lib": [
       "dom",
       "dom.iterable",

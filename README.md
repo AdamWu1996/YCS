@@ -50,7 +50,7 @@ npm run supabase:truncate
 1. 複製 `.env.example` 為 `.env.local`（若尚未建立）。
 2. 啟動 Supabase 後執行 `npx supabase status`，將輸出中的 **anon**、**service_role** 等金鑰填入 `.env.local`（勿將含密鑰的檔案提交至版本庫）。
 
-`DATABASE_URL` 預設可對齊 `.env.example`（本機 Postgres 埠請以 `supabase/config.toml` 的 `[db] port` 為準，目前為 `54322`）。
+`DATABASE_URL` 預設可對齊 `.env.example`（本機 Postgres 埠請以 `supabase/config.toml` 的 `[db] port` 為準，目前為 `55432`）。
 
 #### 工號登入（過渡期）所需密鑰
 
